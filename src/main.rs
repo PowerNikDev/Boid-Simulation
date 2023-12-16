@@ -1,12 +1,16 @@
 use std::f32::consts::PI;
-
 use bevy::core_pipeline::clear_color::ClearColorConfig;
+use bevy::ecs::world;
 use bevy::prelude::*;
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 use bevy::render::mesh::Indices;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::sprite::MaterialMesh2dBundle;
 use bevy::window::{PrimaryWindow, WindowMode, WindowResolution};
+use crate::quadtree::QuadTree;
+use crate::quadtree::Rectangle;
+
+mod quadtree;
 
 use rand::{thread_rng, Rng};
 
@@ -21,7 +25,8 @@ struct SimulationSettings
     protected_range: f32,
     min_speed: f32,
     max_speed: f32,
-    turn_factor: f32
+    turn_factor: f32,
+    attraction_point_factor: f32
 }
 
 impl SimulationSettings
@@ -35,28 +40,29 @@ impl SimulationSettings
         protected_range: f32,
         min_speed: f32,
         max_speed: f32,
-        turn_factor: f32
+        turn_factor: f32,
+        attraction_point_factor: f32
     ) -> SimulationSettings
     {
         SimulationSettings { boid_size: boid_size, seperation_factor: seperation_factor, alignment_factor: alignment_factor, 
-            cohesion_factor: cohesion_factor, perception_range: perception_range, protected_range: protected_range, min_speed: min_speed, max_speed: max_speed, turn_factor: turn_factor}
+            cohesion_factor: cohesion_factor, perception_range: perception_range, protected_range: protected_range, min_speed: min_speed, max_speed: max_speed, 
+            turn_factor: turn_factor, attraction_point_factor: attraction_point_factor}
     }
 
     fn default() -> SimulationSettings
     {
         SimulationSettings {boid_size: 1000, seperation_factor: 0.3, alignment_factor: 0.075, 
-            cohesion_factor: 0.055, perception_range: 60.0, protected_range: 12.0, min_speed: 5.0, max_speed: 5.1, turn_factor: 0.4}
+            cohesion_factor: 0.055, perception_range: 60.0, protected_range: 12.0, min_speed: 5.0, max_speed: 5.1, turn_factor: 0.4, attraction_point_factor: 0.1}
     }
 }
 
-#[derive(Resource)]
-struct ScreenMargins
+
+#[derive(Component)]
+struct AttractionPoint
 {
-    left_margin: f32,
-    right_margin: f32,
-    top_margin: f32,
-    bottom_margin: f32
+    position: Vec2
 }
+
 
 #[derive(Component)]
 struct Movement
@@ -67,6 +73,7 @@ struct Movement
 
 #[derive(Component)]
 struct Boid{id: u32}
+
 
 fn main() 
 {
@@ -82,6 +89,7 @@ fn main()
         ..default()
     }), LogDiagnosticsPlugin::default(), FrameTimeDiagnosticsPlugin::default()))
     .add_systems(Startup, (load_simulation, spawn_camera))
+    .add_systems(Update, mouse_button_input)
     .add_systems(Update, simulate)
     .add_systems(Update, apply_velocity.after(simulate))
     .add_systems(Update, draw_boids.after(apply_velocity))
@@ -135,7 +143,10 @@ fn load_simulation (
     let mut x: f32;
     let mut y: f32;
 
+    let mut a: usize = 0;
+
     for i in 0..simulation_settings.boid_size as u32 {
+        a += 1;
         x = rng.gen_range(-(window.width() / 2.0) .. window.width() / 2.0) as f32; 
         y = rng.gen_range(-(window.height() / 2.0) .. (window.height() / 2.0)) as f32;
 
@@ -147,17 +158,32 @@ fn load_simulation (
                 ..default()
             },
             Boid {id: i},
-            Movement {velocity: Vec2::new(x, y), position: Vec2::new(x - (window.width() / 2.0), y - (window.height() / 2.0))}
+            Movement {velocity: Vec2::new(x, y), position: Vec2::new(x - (window.width() / 2.0) + i as f32 * 10.0, y - (window.height() / 2.0))}
         ));
-    }   
+    }
 
-    commands.insert_resource(ScreenMargins{ left_margin: window.width() / 6.0, right_margin: window.width() - (window.width() / 6.0), 
-        top_margin: window.height() / 5.0 , bottom_margin: window.height() - (window.height() / 5.0)});
+    println!("{}", a);
+
+    let mut quadtree = QuadTree::new(Rectangle {position: Vec2::ZERO, size: Vec2::new(window.width(), window.height())}, 4); 
+    quadtree.insert(Vec2::new(30.0, 30.0));
+    quadtree.insert(Vec2::new(40.0, 40.0));
+    quadtree.insert(Vec2::new(50.0, 50.0));
+    quadtree.insert(Vec2::new(60.0, 60.0));
+    quadtree.insert(Vec2::new(70.0, 70.0));
+
+    quadtree.insert(Vec2::new(-30.0, -30.0));
+    quadtree.insert(Vec2::new(30.0, -30.0));
+    quadtree.insert(Vec2::new(-30.0, 30.0));
+
+    println!("{:?}", quadtree);
 
 }
  
 // Calculate the velocity of the boids
-fn simulate(mut boid_query: Query<(&mut Movement, &Boid)>, window_query: Query<&Window, With<PrimaryWindow>>,simulation_settings: Res<SimulationSettings>, screen_margins: Res<ScreenMargins>) 
+fn simulate(mut boid_query: Query<(&mut Movement, &Boid)>, 
+  window_query: Query<&Window, With<PrimaryWindow>>, 
+  simulation_settings: Res<SimulationSettings>,
+  attraction_points_query: Query<&AttractionPoint>)
 {
     let window = window_query.get_single().unwrap();
     let mut changes = Vec::new();
@@ -174,6 +200,19 @@ fn simulate(mut boid_query: Query<(&mut Movement, &Boid)>, window_query: Query<&
         let mut cohesion_position = Vec2::ZERO;
         // ... turning at the edge of the screen
         let mut turn_dv = Vec2::ZERO;
+        
+
+        // Computes the average position of every attraction points so the boids can fly towards it
+        let mut attraction_position = Vec2::ZERO;
+        // Using this variable instead of attraction_points_query.iter().count() because the method performs with O(n) time complexity because it has to iterate over the whole iterator, to get
+        // the average position this must be done necessarily why we can just do it in there. This may be a small improvement, but not doing it knowing it is not perfect bothered me
+        let mut attraction_count = 0;
+        for attraction_point in attraction_points_query.iter()
+        {
+            attraction_position += attraction_point.position;
+            attraction_count += 1;
+        }
+        attraction_position /= attraction_count as f32;
 
         // Iterate over every other boid
         for other_boid in boid_query.iter() 
@@ -196,8 +235,13 @@ fn simulate(mut boid_query: Query<(&mut Movement, &Boid)>, window_query: Query<&
 
                 // Alignment
                 alignment_dv += other_boid.0.velocity;
+
+                // Cohesion
                 cohesion_position += other_boid.0.position;
                 neighboring_boids += 1;
+
+                // Attraction points
+                
             }
         }
         
@@ -225,9 +269,10 @@ fn simulate(mut boid_query: Query<(&mut Movement, &Boid)>, window_query: Query<&
         changes.push(seperation_dv.normalize_or_zero() * simulation_settings.seperation_factor
          + turn_dv.normalize_or_zero() * simulation_settings.turn_factor
          + (alignment_dv - boid.0.velocity).normalize_or_zero() * simulation_settings.alignment_factor
-         + (cohesion_position - boid.0.position).normalize_or_zero() * simulation_settings.cohesion_factor);
+         + (cohesion_position - boid.0.position).normalize_or_zero() * simulation_settings.cohesion_factor
+         + (if boid.1.id % 2 == 0 {(attraction_position - boid.0.position).normalize_or_zero() * simulation_settings.attraction_point_factor} else {Vec2::ZERO}));
     }
-    
+
     for (mut boid, change) in boid_query.iter_mut().zip(changes.into_iter()) 
     {
         boid.0.velocity += change;
@@ -236,7 +281,7 @@ fn simulate(mut boid_query: Query<(&mut Movement, &Boid)>, window_query: Query<&
 
 
 // Calculate the new position of the boids
-fn apply_velocity(mut boid_query: Query<&mut Movement>, time: Res<Time>, simulation_settings: Res<SimulationSettings>) 
+fn apply_velocity(mut boid_query: Query<&mut Movement>, simulation_settings: Res<SimulationSettings>) 
 {
     for mut boid in &mut boid_query
     {
@@ -255,5 +300,49 @@ fn draw_boids(mut boid_query: Query<(&mut Movement, &mut Transform)>)
         transfrom.translation = Vec3::new(movement.position.x, movement.position.y, 0.0);
         transfrom.rotation = Quat::from_rotation_z(movement.velocity.y.atan2(movement.velocity.x) - (90.0 * PI/180.0));
         //transfrom.look_at(Vec3::new(movement.velocity.x, movement.velocity.y, 0.0), Vec3::new(0.0, 1.0, 0.0));
+    }
+}
+
+
+// Handle mouse input and place points to which the boids are attracted to
+fn mouse_button_input(buttons: Res<Input<MouseButton>>, 
+    window_query: Query<&Window, With<PrimaryWindow>>, 
+    camera_query: Query<(&Camera, &GlobalTransform)>, 
+    mut attraction_points_query: Query<(&mut AttractionPoint, Entity)>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>)
+{
+    let window = window_query.single();
+    let (camera, camera_transform) = camera_query.single();
+    
+    // Try to get the position of the cursor
+    if let Some(world_position) = window
+        .cursor_position()
+        .and_then(|cursor| camera.viewport_to_world_2d(camera_transform, cursor))
+    {
+        // Add attraction point at the position of the cursor if the left mouse button was pressed
+        if buttons.just_pressed(MouseButton::Left)
+        {
+            commands.spawn((
+                MaterialMesh2dBundle {
+                    transform: Transform::from_xyz(world_position.x, world_position.y, 1.0).with_rotation(Quat::from_rotation_z(0.0)),
+                    mesh: meshes.add(shape::Circle::new(3.0).into()).into(),
+                    material: materials.add(ColorMaterial::from(Color::RED)),
+                    ..default()
+                },
+                AttractionPoint {
+                    position: world_position
+                }
+            ));
+        }
+
+        // Despawns attraction point at the position of the cursor if the right mouse button was pressed
+        if buttons.pressed(MouseButton::Right)
+        {
+            attraction_points_query.iter_mut()
+            .filter(|point| (point.0.position - world_position).length() < 7.0)
+            .for_each(|point| commands.entity(point.1).despawn());
+        }
     }
 }
