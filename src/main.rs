@@ -1,6 +1,7 @@
 use std::f32::consts::PI;
 use bevy::core_pipeline::clear_color::ClearColorConfig;
 use bevy::ecs::world;
+use bevy::math::vec3;
 use bevy::prelude::*;
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 use bevy::render::mesh::Indices;
@@ -51,7 +52,7 @@ impl SimulationSettings
 
     fn default() -> SimulationSettings
     {
-        SimulationSettings {boid_size: 1000, seperation_factor: 0.3, alignment_factor: 0.075, 
+        SimulationSettings {boid_size: 500, seperation_factor: 0.3, alignment_factor: 0.075, 
             cohesion_factor: 0.055, perception_range: 60.0, protected_range: 12.0, min_speed: 5.0, max_speed: 5.1, turn_factor: 0.4, attraction_point_factor: 0.1}
     }
 }
@@ -239,9 +240,6 @@ fn simulate(mut boid_query: Query<(&mut Movement, &Boid)>,
                 // Cohesion
                 cohesion_position += other_boid.0.position;
                 neighboring_boids += 1;
-
-                // Attraction points
-                
             }
         }
         
@@ -249,19 +247,19 @@ fn simulate(mut boid_query: Query<(&mut Movement, &Boid)>,
         cohesion_position /= neighboring_boids as f32;
 
         // Turns the boid a away from the edges of the window
-        if boid.0.position.x < 100.0
+        if boid.0.position.x < 150.0
         {
             turn_dv.x += simulation_settings.turn_factor;
         }
-        if boid.0.position.x > (window.width() - 100.0)
+        if boid.0.position.x > (window.width() - 150.0)
         {
             turn_dv.x -= simulation_settings.turn_factor;
         }
-        if boid.0.position.y < 100.0
+        if boid.0.position.y < 150.0
         {
             turn_dv.y += simulation_settings.turn_factor;
         }
-        if boid.0.position.y > (window.height() - 100.0)
+        if boid.0.position.y > (window.height() - 150.0)
         {
             turn_dv.y -= simulation_settings.turn_factor;
         }

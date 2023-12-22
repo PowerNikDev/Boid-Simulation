@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy::{prelude::*, app::Plugin};
 
 
 // Implementation of a simple data structure to store a rectangle
@@ -14,7 +14,24 @@ pub struct Rectangle
 
 impl Rectangle
 {
+    // Check if an point is within the rectangle
+    fn contains(&self, point: &Vec2) -> bool
+    {
+        return 
+            point.x >= self.position.x - self.size.x &&
+            point.x < self.position.x + self.size.x &&
+            point.y >= self.position.y - self.size.y &&
+            point.y < self.position.y + self.size.y
+    }
 
+    fn intersects(&self, region: &Rectangle) -> bool
+    {
+        return
+            !(region.position.x - region.size.x > self.position.x + self.size.x ||
+            region.position.x + region.size.x < self.position.x - self.size.x ||
+            region.position.y - region.size.y > self.position.y + self.size.y ||
+            region.position.y + region.size.y < self.position.y - self.size.y) 
+    }
 }
 
 
@@ -52,14 +69,49 @@ impl QuadTree
                 self.subdivide();
             }
 
-            // This may seem like a mistake, why inserting the point in every of the cildren?
-            // It works, because every child checks if the point is within its boundarz
-            self.quads[0].insert(point);
-            self.quads[1].insert(point);
-            self.quads[2].insert(point);
-            self.quads[3].insert(point);
+            if self.quads[0].boundary.contains(&point)
+            {
+                self.quads[0].insert(point);
+            }
+            else if self.quads[1].boundary.contains(&point) 
+            {
+                self.quads[1].insert(point);
+            }
+            else if self.quads[2].boundary.contains(&point)
+            {
+                self.quads[2].insert(point);
+            }
+            else if self.quads[3].boundary.contains(&point)
+            {
+                self.quads[3].insert(point);
+            }
         }
     
+    }
+
+    pub fn query(&self, region: &Rectangle) -> Vec<&Vec2>
+    {
+        if !self.boundary.intersects(&region)
+        {
+            return vec![]
+        }
+
+        let mut found: Vec<&Vec2> = vec![];
+
+        for point in &self.points
+        {
+            if region.contains(&point)
+            {
+                found.push(point);
+            }
+        }
+
+        for quad in &self.quads
+        {
+            found.append(&mut quad.query(region));
+        }
+
+        return found
     }
 
     fn subdivide(&mut self)
