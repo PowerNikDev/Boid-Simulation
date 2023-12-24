@@ -1,4 +1,4 @@
-use bevy::{prelude::*, app::Plugin};
+use bevy::prelude::*;
 
 
 // Implementation of a simple data structure to store a rectangle
@@ -37,11 +37,13 @@ impl Rectangle
 
 // Implementation of the Quad Tree data structure
 #[derive(Debug)]
+#[derive(Resource)]
 pub struct QuadTree
 {
     boundary: Rectangle,
     capacity: usize,
-    points: Vec<Vec2>,
+    // The Quadtree stores the position and the velocity of a boid. The first Vec2 stores the position, the second one the velocity
+    points: Vec<(Vec2, Vec2)>,
     pub quads: Vec<QuadTree>,
     divided: bool,
 }
@@ -54,7 +56,7 @@ impl QuadTree
     }
 
     // Inserts a new point or in the children
-    pub fn insert(&mut self, point: Vec2)
+    pub fn insert(&mut self, point: (Vec2, Vec2))
     {
         // If the current quad still has enough capacitz, it will store the new point, otherwise it will subdivide
         // The current quad will still keep their existing points and not give them to its children
@@ -65,23 +67,22 @@ impl QuadTree
         else {
             if !self.divided
             {
-                println!("Subdivide");
                 self.subdivide();
             }
 
-            if self.quads[0].boundary.contains(&point)
+            if self.quads[0].boundary.contains(&point.0)
             {
                 self.quads[0].insert(point);
             }
-            else if self.quads[1].boundary.contains(&point) 
+            else if self.quads[1].boundary.contains(&point.0) 
             {
                 self.quads[1].insert(point);
             }
-            else if self.quads[2].boundary.contains(&point)
+            else if self.quads[2].boundary.contains(&point.0)
             {
                 self.quads[2].insert(point);
             }
-            else if self.quads[3].boundary.contains(&point)
+            else if self.quads[3].boundary.contains(&point.0)
             {
                 self.quads[3].insert(point);
             }
@@ -89,18 +90,13 @@ impl QuadTree
     
     }
 
-    pub fn query(&self, region: &Rectangle) -> Vec<&Vec2>
+    pub fn query(&self, region: &Rectangle) -> Vec<&(Vec2, Vec2)>
     {
-        if !self.boundary.intersects(&region)
-        {
-            return vec![]
-        }
-
-        let mut found: Vec<&Vec2> = vec![];
+        let mut found: Vec<&(Vec2, Vec2)> = vec![];
 
         for point in &self.points
         {
-            if region.contains(&point)
+            if region.contains(&point.0)
             {
                 found.push(point);
             }
@@ -108,7 +104,10 @@ impl QuadTree
 
         for quad in &self.quads
         {
-            found.append(&mut quad.query(region));
+            if quad.boundary.intersects(region)
+            {
+                found.append(&mut quad.query(region));
+            }
         }
 
         return found
@@ -143,4 +142,41 @@ impl QuadTree
         self.divided = true;
     }
 
+    // Remove a point at the position of the given point and inserting a new one, effectively "moving" the point
+    pub fn move_point(&mut self, current_point: (Vec2, Vec2), new_point: (Vec2, Vec2))
+    {
+        self.remove_point(current_point);
+        self.insert(new_point)
+    }
+
+    // Remove a point by the position, also de-subdivides a quad if all children are empty
+    fn remove_point(&mut self, point: (Vec2, Vec2))
+    {
+        let index = self.points.iter().position(|&x| x == point);
+        
+        if index.is_some()
+        {
+            self.points.swap_remove(index.unwrap());
+        }
+
+        let mut all_empty = true;
+        for quad in &mut self.quads
+        {
+            if quad.boundary.contains(&point.0)
+            {
+                quad.remove_point(point)
+            }
+
+            if quad.points.len() > 0
+            {
+                all_empty = false;
+            }
+        }
+
+        if all_empty
+        {
+            self.divided = false;
+            self.quads.clear();
+        }
+    }
 } 

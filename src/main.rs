@@ -1,7 +1,5 @@
 use std::f32::consts::PI;
 use bevy::core_pipeline::clear_color::ClearColorConfig;
-use bevy::ecs::world;
-use bevy::math::vec3;
 use bevy::prelude::*;
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 use bevy::render::mesh::Indices;
@@ -75,11 +73,15 @@ struct Movement
 #[derive(Component)]
 struct Boid{id: u32}
 
+#[derive(Component)]
+struct DebugPoint;
+
 
 fn main() 
 {
     App::new()
     .insert_resource(SimulationSettings::default())
+    .insert_resource(QuadTree::new(Rectangle {position: Vec2::ZERO, size: Vec2::new(1300.0, 1300.0)}, 6))
     .add_plugins((DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
         mode: WindowMode::Windowed,
@@ -106,7 +108,7 @@ fn spawn_camera(
 
     commands.spawn(
         Camera2dBundle {
-            transform: Transform::from_xyz(window.width() / 2.0, window.height() / 2.0, 1.0),
+            transform: Transform::from_xyz(window.width() / 2.0, window.height() / 2.0, 1.0).with_scale(Vec3::new(1.0, 1.0, 1.0)),
             camera_2d: Camera2d {
                 clear_color: ClearColorConfig::Custom(Color::WHITE)
             },
@@ -135,7 +137,8 @@ fn load_simulation (
     window_query: Query<&Window, With<PrimaryWindow>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    simulation_settings: Res<SimulationSettings>
+    simulation_settings: Res<SimulationSettings>,
+    mut quadtree: ResMut<QuadTree>
 ) 
 {
     let window = window_query.get_single().unwrap();
@@ -146,7 +149,19 @@ fn load_simulation (
 
     let mut a: usize = 0;
 
-    for i in 0..simulation_settings.boid_size as u32 {
+    commands.spawn((
+        MaterialMesh2dBundle {
+            transform: Transform::from_xyz(100.0, 100.0, 0.0).with_scale(Vec3::new(10.0, 10.0, 10.0)).with_rotation(Quat::from_rotation_z(0.0)),
+            mesh: meshes.add(create_triangle()).into(),
+            material: materials.add(ColorMaterial::from(Color::RED)),
+            ..default()
+        },
+        Boid {id: 0},
+        Movement {velocity: Vec2::new(10.0, 10.0), position: Vec2::new(110.0, 110.0)}
+    ));
+    quadtree.insert((Vec2::new(100.0, 100.0), Vec2::new(10.0, 10.0)));
+
+    for i in 1..simulation_settings.boid_size as u32 {
         a += 1;
         x = rng.gen_range(-(window.width() / 2.0) .. window.width() / 2.0) as f32; 
         y = rng.gen_range(-(window.height() / 2.0) .. (window.height() / 2.0)) as f32;
@@ -161,31 +176,24 @@ fn load_simulation (
             Boid {id: i},
             Movement {velocity: Vec2::new(x, y), position: Vec2::new(x - (window.width() / 2.0) + i as f32 * 10.0, y - (window.height() / 2.0))}
         ));
+        quadtree.insert((Vec2::new(x - (window.width() / 2.0) + i as f32 * 10.0, y - (window.height() / 2.0)), Vec2::new(x, y)));
     }
 
     println!("{}", a);
-
-    let mut quadtree = QuadTree::new(Rectangle {position: Vec2::ZERO, size: Vec2::new(window.width(), window.height())}, 4); 
-    quadtree.insert(Vec2::new(30.0, 30.0));
-    quadtree.insert(Vec2::new(40.0, 40.0));
-    quadtree.insert(Vec2::new(50.0, 50.0));
-    quadtree.insert(Vec2::new(60.0, 60.0));
-    quadtree.insert(Vec2::new(70.0, 70.0));
-
-    quadtree.insert(Vec2::new(-30.0, -30.0));
-    quadtree.insert(Vec2::new(30.0, -30.0));
-    quadtree.insert(Vec2::new(-30.0, 30.0));
-
-    println!("{:?}", quadtree);
-
 }
  
 // Calculate the velocity of the boids
 fn simulate(mut boid_query: Query<(&mut Movement, &Boid)>, 
   window_query: Query<&Window, With<PrimaryWindow>>, 
   simulation_settings: Res<SimulationSettings>,
-  attraction_points_query: Query<&AttractionPoint>)
+  attraction_points_query: Query<&AttractionPoint>,
+  quadtree: Res<QuadTree>,
+  mut commands: Commands,
+  debug_points: Query<(&DebugPoint, Entity)>,
+  mut meshes: ResMut<Assets<Mesh>>,
+  mut materials: ResMut<Assets<ColorMaterial>>)
 {
+    debug_points.for_each(|point| commands.entity(point.1).despawn());
     let window = window_query.get_single().unwrap();
     let mut changes = Vec::new();
 
@@ -216,29 +224,37 @@ fn simulate(mut boid_query: Query<(&mut Movement, &Boid)>,
         attraction_position /= attraction_count as f32;
 
         // Iterate over every other boid
-        for other_boid in boid_query.iter() 
+        for other_boid in quadtree.query(&Rectangle{position: boid.0.position, size: Vec2::new(simulation_settings.perception_range, simulation_settings.perception_range)}).iter()
         {
-            if other_boid.1.id == boid.1.id
-            {
-                continue;
-            }
-            let distance = boid.0.position.distance(other_boid.0.position);
+            let distance = boid.0.position.distance(other_boid.0);
 
             // Checks if the other boid is visible to the current boid
             if distance < simulation_settings.perception_range
             {
+                if boid.1.id == 0
+                {
+                    commands.spawn((
+                        MaterialMesh2dBundle {
+                            transform: Transform::from_xyz(other_boid.0.x, other_boid.0.y, 1.0).with_rotation(Quat::from_rotation_z(0.0)),
+                            mesh: meshes.add(shape::Circle::new(3.0).into()).into(),
+                            material: materials.add(ColorMaterial::from(Color::GREEN)),
+                            ..default()
+                        },
+                        DebugPoint {}
+                    ));
+                }
                 // Seperation
                 if distance < simulation_settings.protected_range
                 {
-                    let offset = boid.0.position - other_boid.0.position;
+                    let offset = boid.0.position - other_boid.0;
                     seperation_dv += offset.normalize() * (simulation_settings.protected_range - offset.length()).abs();
                 }
 
                 // Alignment
-                alignment_dv += other_boid.0.velocity;
+                alignment_dv += other_boid.1;
 
                 // Cohesion
-                cohesion_position += other_boid.0.position;
+                cohesion_position += other_boid.0;
                 neighboring_boids += 1;
             }
         }
@@ -278,14 +294,16 @@ fn simulate(mut boid_query: Query<(&mut Movement, &Boid)>,
 }
 
 
-// Calculate the new position of the boids
-fn apply_velocity(mut boid_query: Query<&mut Movement>, simulation_settings: Res<SimulationSettings>) 
+// Calculate the new position of the boids and updates the quadtree
+fn apply_velocity(mut boid_query: Query<&mut Movement>, simulation_settings: Res<SimulationSettings>, mut quadtree: ResMut<QuadTree>) 
 {
     for mut boid in &mut boid_query
     {
         boid.velocity = boid.velocity.clamp_length(simulation_settings.min_speed, simulation_settings.max_speed);
+        let old = (boid.position, boid.velocity);
         boid.position.x += boid.velocity.x;
         boid.position.y += boid.velocity.y;
+        quadtree.move_point(old, (boid.position, boid.velocity))
     }
 }
 
