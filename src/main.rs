@@ -50,8 +50,8 @@ impl SimulationSettings
 
     fn default() -> SimulationSettings
     {
-        SimulationSettings {boid_size: 1500, seperation_factor: 0.3, alignment_factor: 0.55, 
-            cohesion_factor: 0.15, perception_range: 60.0, protected_range: 30.0, min_speed: 5.0, max_speed: 5.1, turn_factor: 0.4, attraction_point_factor: 0.1 * 10.0}
+        SimulationSettings {boid_size: 2000, seperation_factor: 0.3, alignment_factor: 0.55, 
+            cohesion_factor: 0.15, perception_range: 60.0, protected_range: 30.0, min_speed: 5.0, max_speed: 5.1, turn_factor: 0.2, attraction_point_factor: 0.1}
     } 
 }
 
@@ -108,7 +108,7 @@ fn spawn_camera(
 
     commands.spawn(
         Camera2dBundle {
-            transform: Transform::from_xyz(window.width() / 2.0, window.height() / 2.0, 1.0).with_scale(Vec3::new(1.0, 1.0, 1.0)),
+            transform: Transform::from_xyz(window.width() / 2.0, window.height() / 2.0, 1.0).with_scale(Vec3::new(1.5, 1.5, 1.0)),
             camera_2d: Camera2d {
                 clear_color: ClearColorConfig::Custom(Color::WHITE)
             },
@@ -158,7 +158,7 @@ fn load_simulation (
 
         commands.spawn((
             MaterialMesh2dBundle {
-                transform: Transform::from_xyz(x, y, 0.0).with_scale(Vec3::new(3.0, 3.0, 3.0)).with_rotation(Quat::from_rotation_z(0.0)),
+                transform: Transform::from_xyz(x, y, 0.0).with_scale(Vec3::new(2.0, 2.0, 2.0)).with_rotation(Quat::from_rotation_z(0.0)),
                 mesh: meshes.add(create_triangle()).into(),
                 material: materials.add(ColorMaterial::from(Color::BLACK)),
                 ..default()
