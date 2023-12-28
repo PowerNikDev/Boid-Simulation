@@ -14,14 +14,14 @@ pub struct Rectangle
 
 impl Rectangle
 {
-    // Check if an point is within the rectangle
+    // Check if an point is within the rectangle using AABB collision
     fn contains(&self, point: &Vec2) -> bool
     {
         return 
             point.x >= self.position.x - self.size.x &&
-            point.x < self.position.x + self.size.x &&
+            point.x <= self.position.x + self.size.x &&
             point.y >= self.position.y - self.size.y &&
-            point.y < self.position.y + self.size.y
+            point.y <= self.position.y + self.size.y
     }
 
     fn intersects(&self, region: &Rectangle) -> bool
@@ -52,7 +52,7 @@ impl QuadTree
 {
     pub fn new(boundary: Rectangle, capacity: usize) -> QuadTree
     {
-        QuadTree{boundary: boundary, capacity: capacity, points: Vec::with_capacity(capacity), quads: Vec::with_capacity(4), divided: false}
+        QuadTree { boundary: boundary, capacity: capacity, points: Vec::with_capacity(capacity), quads: Vec::with_capacity(4), divided: false}
     }
 
     // Inserts a new point or in the children
@@ -116,22 +116,22 @@ impl QuadTree
     fn subdivide(&mut self)
     {
         let northwest = Rectangle {
-            position: Vec2 { x: self.boundary.position.x + (self.boundary.size.x / 4.0), y: self.boundary.position.y + (self.boundary.size.y / 4.0) },
+            position: Vec2 { x: self.boundary.position.x + (self.boundary.size.x / 2.0), y: self.boundary.position.y + (self.boundary.size.y / 2.0) },
             size: self.boundary.size / 2.0
         };
 
         let northeast = Rectangle {
-            position: Vec2 { x: self.boundary.position.x - (self.boundary.size.x / 4.0), y: self.boundary.position.y + (self.boundary.size.y / 4.0) },
+            position: Vec2 { x: self.boundary.position.x - (self.boundary.size.x / 2.0), y: self.boundary.position.y + (self.boundary.size.y / 2.0) },
             size: self.boundary.size / 2.0
         };
 
         let southwest = Rectangle {
-            position: Vec2 { x: self.boundary.position.x + (self.boundary.size.x / 4.0), y: self.boundary.position.y - (self.boundary.size.y / 4.0) },
+            position: Vec2 { x: self.boundary.position.x + (self.boundary.size.x / 2.0), y: self.boundary.position.y - (self.boundary.size.y / 2.0) },
             size: self.boundary.size / 2.0
         };
 
         let southeast = Rectangle {
-            position: Vec2 { x: self.boundary.position.x - (self.boundary.size.x / 4.0), y: self.boundary.position.y - (self.boundary.size.y / 4.0) },
+            position: Vec2 { x: self.boundary.position.x - (self.boundary.size.x / 2.0), y: self.boundary.position.y - (self.boundary.size.y / 2.0) },
             size: self.boundary.size / 2.0
         };
         
@@ -142,29 +142,35 @@ impl QuadTree
         self.divided = true;
     }
 
-    // Remove a point at the position of the given point and inserting a new one, effectively "moving" the point
-    pub fn move_point(&mut self, current_point: (Vec2, Vec2), new_point: (Vec2, Vec2))
+    // Remove a point at the position of the given point and inserting a new one, effectively "moving" the point, returns true if a point was removed
+    pub fn move_point(&mut self, current_point: (Vec2, Vec2), new_point: (Vec2, Vec2)) -> bool
     {
-        self.remove_point(current_point);
-        self.insert(new_point)
+        let success = self.remove_point(current_point);
+        self.insert(new_point);
+        return success
     }
 
-    // Remove a point by the position, also de-subdivides a quad if all children are empty
-    fn remove_point(&mut self, point: (Vec2, Vec2))
+    // Remove a point by the position, also de-subdivides a quad if all children are empty, returns true if a point was removed
+    fn remove_point(&mut self, point: (Vec2, Vec2)) -> bool
     {
-        let index = self.points.iter().position(|&x| x == point);
+        let index = self.points.iter().position(|&x| x.0 == point.0);
         
         if index.is_some()
         {
             self.points.swap_remove(index.unwrap());
+            return true
         }
 
         let mut all_empty = true;
+        let mut removed = false;
         for quad in &mut self.quads
         {
             if quad.boundary.contains(&point.0)
-            {
-                quad.remove_point(point)
+            {  
+                if quad.remove_point(point)
+                {
+                    removed = true;
+                }
             }
 
             if quad.points.len() > 0
@@ -178,5 +184,7 @@ impl QuadTree
             self.divided = false;
             self.quads.clear();
         }
+
+        return removed
     }
 } 

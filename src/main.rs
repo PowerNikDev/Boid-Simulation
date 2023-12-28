@@ -50,9 +50,9 @@ impl SimulationSettings
 
     fn default() -> SimulationSettings
     {
-        SimulationSettings {boid_size: 500, seperation_factor: 0.3, alignment_factor: 0.075, 
-            cohesion_factor: 0.055, perception_range: 60.0, protected_range: 12.0, min_speed: 5.0, max_speed: 5.1, turn_factor: 0.4, attraction_point_factor: 0.1}
-    }
+        SimulationSettings {boid_size: 1500, seperation_factor: 0.3, alignment_factor: 0.55, 
+            cohesion_factor: 0.15, perception_range: 60.0, protected_range: 30.0, min_speed: 5.0, max_speed: 5.1, turn_factor: 0.4, attraction_point_factor: 0.1 * 10.0}
+    } 
 }
 
 
@@ -149,19 +149,9 @@ fn load_simulation (
 
     let mut a: usize = 0;
 
-    commands.spawn((
-        MaterialMesh2dBundle {
-            transform: Transform::from_xyz(100.0, 100.0, 0.0).with_scale(Vec3::new(10.0, 10.0, 10.0)).with_rotation(Quat::from_rotation_z(0.0)),
-            mesh: meshes.add(create_triangle()).into(),
-            material: materials.add(ColorMaterial::from(Color::RED)),
-            ..default()
-        },
-        Boid {id: 0},
-        Movement {velocity: Vec2::new(10.0, 10.0), position: Vec2::new(110.0, 110.0)}
-    ));
-    quadtree.insert((Vec2::new(100.0, 100.0), Vec2::new(10.0, 10.0)));
+    
 
-    for i in 1..simulation_settings.boid_size as u32 {
+    for i in 0..simulation_settings.boid_size as u32 {
         a += 1;
         x = rng.gen_range(-(window.width() / 2.0) .. window.width() / 2.0) as f32; 
         y = rng.gen_range(-(window.height() / 2.0) .. (window.height() / 2.0)) as f32;
@@ -174,9 +164,9 @@ fn load_simulation (
                 ..default()
             },
             Boid {id: i},
-            Movement {velocity: Vec2::new(x, y), position: Vec2::new(x - (window.width() / 2.0) + i as f32 * 10.0, y - (window.height() / 2.0))}
+            Movement {velocity: Vec2::new(x, y), position: Vec2::new(x - (window.width() / 2.0) + i as f32 * 1.0, y - (window.height() / 2.0))}
         ));
-        quadtree.insert((Vec2::new(x - (window.width() / 2.0) + i as f32 * 10.0, y - (window.height() / 2.0)), Vec2::new(x, y)));
+        quadtree.insert((Vec2::new(x - (window.width() / 2.0) + i as f32 * 1.0, y - (window.height() / 2.0)), Vec2::new(x, y)));
     }
 
     println!("{}", a);
@@ -188,12 +178,8 @@ fn simulate(mut boid_query: Query<(&mut Movement, &Boid)>,
   simulation_settings: Res<SimulationSettings>,
   attraction_points_query: Query<&AttractionPoint>,
   quadtree: Res<QuadTree>,
-  mut commands: Commands,
-  debug_points: Query<(&DebugPoint, Entity)>,
-  mut meshes: ResMut<Assets<Mesh>>,
-  mut materials: ResMut<Assets<ColorMaterial>>)
+)
 {
-    debug_points.for_each(|point| commands.entity(point.1).despawn());
     let window = window_query.get_single().unwrap();
     let mut changes = Vec::new();
 
@@ -227,27 +213,16 @@ fn simulate(mut boid_query: Query<(&mut Movement, &Boid)>,
         for other_boid in quadtree.query(&Rectangle{position: boid.0.position, size: Vec2::new(simulation_settings.perception_range, simulation_settings.perception_range)}).iter()
         {
             let distance = boid.0.position.distance(other_boid.0);
-
+            
             // Checks if the other boid is visible to the current boid
             if distance < simulation_settings.perception_range
             {
-                if boid.1.id == 0
-                {
-                    commands.spawn((
-                        MaterialMesh2dBundle {
-                            transform: Transform::from_xyz(other_boid.0.x, other_boid.0.y, 1.0).with_rotation(Quat::from_rotation_z(0.0)),
-                            mesh: meshes.add(shape::Circle::new(3.0).into()).into(),
-                            material: materials.add(ColorMaterial::from(Color::GREEN)),
-                            ..default()
-                        },
-                        DebugPoint {}
-                    ));
-                }
                 // Seperation
                 if distance < simulation_settings.protected_range
                 {
                     let offset = boid.0.position - other_boid.0;
-                    seperation_dv += offset.normalize() * (simulation_settings.protected_range - offset.length()).abs();
+
+                    seperation_dv += offset.normalize_or_zero() * (simulation_settings.protected_range - offset.length()).abs();
                 }
 
                 // Alignment
@@ -282,9 +257,9 @@ fn simulate(mut boid_query: Query<(&mut Movement, &Boid)>,
 
         changes.push(seperation_dv.normalize_or_zero() * simulation_settings.seperation_factor
          + turn_dv.normalize_or_zero() * simulation_settings.turn_factor
-         + (alignment_dv - boid.0.velocity).normalize_or_zero() * simulation_settings.alignment_factor
+         + (alignment_dv - boid.0.velocity * -1.0).normalize_or_zero() * simulation_settings.alignment_factor
          + (cohesion_position - boid.0.position).normalize_or_zero() * simulation_settings.cohesion_factor
-         + (if boid.1.id % 2 == 0 {(attraction_position - boid.0.position).normalize_or_zero() * simulation_settings.attraction_point_factor} else {Vec2::ZERO}));
+         + (attraction_position - boid.0.position).normalize_or_zero() * simulation_settings.attraction_point_factor);
     }
 
     for (mut boid, change) in boid_query.iter_mut().zip(changes.into_iter()) 
@@ -299,17 +274,17 @@ fn apply_velocity(mut boid_query: Query<&mut Movement>, simulation_settings: Res
 {
     for mut boid in &mut boid_query
     {
-        boid.velocity = boid.velocity.clamp_length(simulation_settings.min_speed, simulation_settings.max_speed);
         let old = (boid.position, boid.velocity);
+        boid.velocity = boid.velocity.clamp_length(simulation_settings.min_speed, simulation_settings.max_speed);
         boid.position.x += boid.velocity.x;
         boid.position.y += boid.velocity.y;
-        quadtree.move_point(old, (boid.position, boid.velocity))
+        quadtree.move_point(old, (boid.position, boid.velocity));
     }
 }
 
 
 // Moves the sprites of the boids
-fn draw_boids(mut boid_query: Query<(&mut Movement, &mut Transform)>) 
+fn draw_boids(mut boid_query: Query<(&mut Movement, &mut Transform)>)
 {
     for (movement, mut transfrom) in &mut boid_query
     {
@@ -318,7 +293,6 @@ fn draw_boids(mut boid_query: Query<(&mut Movement, &mut Transform)>)
         //transfrom.look_at(Vec3::new(movement.velocity.x, movement.velocity.y, 0.0), Vec3::new(0.0, 1.0, 0.0));
     }
 }
-
 
 // Handle mouse input and place points to which the boids are attracted to
 fn mouse_button_input(buttons: Res<Input<MouseButton>>, 
