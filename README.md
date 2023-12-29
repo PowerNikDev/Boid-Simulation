@@ -1,3 +1,3 @@
 # Boid Simulation using Quadtrees
 #### Video Demo:  https://www.youtube.com/watch?v=jGHyrR0L-AM)https://www.youtube.com/watch?v=jGHyrR0L-AM
-#### Description: This is my CS50x final project. I used the rust programming language to implement the artifical life program "boids" using the quad tree datatstructure.
+#### Description: This is my CS50x final project. I used the rust programming language to implement the artifical life program "boids" using the quad tree datatstructure. For the graphics I used the bevy game engine. This is not the most performant simulation possible. There are still some things to be improved. The simulation doesn't use multithreading and only runs on one CPU core. The simulation includes points of attraction, to which all boids are attracted. You can place them with the left mouse button and remove them with the right mouse button.
